@@ -32,6 +32,8 @@ REDIS_OBJECT_FEATURE_QUEUE = 'bl:object:feature:queue'
 REDIS_PRODUCT_HASH = 'bl:product:hash'
 REDIS_OBJECT_LIST = 'bl:object:list'
 
+SPAWN_NUMBER = 2
+
 AWS_BUCKET = 'bluelens-style-index'
 INDEX_FILE = 'faiss.index'
 
@@ -45,7 +47,6 @@ storage = s3.S3(AWS_ACCESS_KEY, AWS_SECRET_ACCESS_KEY)
 
 def spawn_indexer(uuid):
 
-  time.sleep(60)
   pool = spawning_pool.SpawningPool()
 
   project_name = 'bl-image-indexer-' + uuid
@@ -130,7 +131,8 @@ def load_from_queue(index_file):
     xb = np.expand_dims(np.array(feature, dtype=np.float32), axis=0)
     obj['feature'] = None
     rconn.rpush(REDIS_OBJECT_LIST, obj['name'])
-    rconn.hset(REDIS_PRODUCT_HASH, obj['name'], pickle.dumps(obj))
+    d = pickle.dumps(obj)
+    rconn.hset(REDIS_PRODUCT_HASH, obj['name'], d)
 
     # xb = np.array(features)
     id_num = rconn.llen(REDIS_OBJECT_LIST)
@@ -145,7 +147,7 @@ def load_from_queue(index_file):
     # print(id_set)
     index2.add_with_ids(xb, id_set)
     file = os.path.join(os.getcwd(), INDEX_FILE)
-    faiss.write_index(index2, file)
+    # faiss.write_index(index2, file)
     if i % 1000 == 0:
       save_index_file(file)
     i = i + 1
@@ -155,4 +157,9 @@ def load_from_queue(index_file):
     # save_to_db()
 
 if __name__ == '__main__':
+  for i in range(3):
+    spawn_indexer(str(i))
+    time.sleep(10)
+
   start_index()
+

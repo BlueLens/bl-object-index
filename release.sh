@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 export ORG="bluelens"
-export IMAGE="bl-detect"
+export IMAGE="bl-index"
 export TAG="latest"
 
 docker login

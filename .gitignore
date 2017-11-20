@@ -199,3 +199,4 @@ venv.bak/
 
 grpc/tmp.jpg
 Dockerfile
+!faiss/*.so

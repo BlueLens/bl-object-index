@@ -35,7 +35,7 @@ REDIS_OBJECT_LIST = 'bl:object:list'
 SPAWN_NUMBER = 2
 
 AWS_BUCKET = 'bluelens-style-index'
-INDEX_FILE = 'faiss.index'
+INDEX_FILE = 'faiss2.index'
 
 options = {
   'REDIS_SERVER': REDIS_SERVER,

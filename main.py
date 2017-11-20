@@ -125,11 +125,12 @@ def load_from_queue(index_file):
   for item in items():
     key, obj_data = item
     obj = pickle.loads(obj_data)
-    log.debug(obj)
+    # log.debug(obj)
 
     feature = obj['feature']
     xb = np.expand_dims(np.array(feature, dtype=np.float32), axis=0)
     obj['feature'] = None
+    log.debug(obj)
     rconn.rpush(REDIS_OBJECT_LIST, obj['name'])
     d = pickle.dumps(obj)
     rconn.hset(REDIS_PRODUCT_HASH, obj['name'], d)
@@ -145,10 +146,13 @@ def load_from_queue(index_file):
     # print(xb.shape)
     # print(id_set.shape)
     # print(id_set)
+    start_time = time.time()
     index2.add_with_ids(xb, id_set)
+    elapsed_time = time.time() - start_time
+    log.info('indexing time: ' + str(elapsed_time))
     file = os.path.join(os.getcwd(), INDEX_FILE)
     # faiss.write_index(index2, file)
-    if i % 1000 == 0:
+    if i % 50 == 0:
       save_index_file(file)
     i = i + 1
     log.info('index done')

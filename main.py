@@ -151,8 +151,8 @@ def load_from_queue(index_file):
     elapsed_time = time.time() - start_time
     log.info('indexing time: ' + str(elapsed_time))
     file = os.path.join(os.getcwd(), INDEX_FILE)
-    # faiss.write_index(index2, file)
     if i % 50 == 0:
+      faiss.write_index(index2, file)
       save_index_file(file)
     i = i + 1
     log.info('index done')

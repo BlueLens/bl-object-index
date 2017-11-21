@@ -29,8 +29,8 @@ DATA_SOURCE_QUEUE = 'REDIS_QUEUE'
 DATA_SOURCE_DB = 'DB'
 
 REDIS_OBJECT_FEATURE_QUEUE = 'bl:object:feature:queue'
-REDIS_PRODUCT_HASH = 'bl:product:hash'
 REDIS_OBJECT_LIST = 'bl:object:list'
+REDIS_OBJECT_HASH = 'bl:object:hash'
 
 SPAWN_NUMBER = 2
 
@@ -133,7 +133,7 @@ def load_from_queue(index_file):
     log.debug(obj)
     rconn.rpush(REDIS_OBJECT_LIST, obj['name'])
     d = pickle.dumps(obj)
-    rconn.hset(REDIS_PRODUCT_HASH, obj['name'], d)
+    rconn.hset(REDIS_OBJECT_HASH, obj['name'], obj['product_id'])
 
     # xb = np.array(features)
     id_num = rconn.llen(REDIS_OBJECT_LIST)

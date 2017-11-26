@@ -29,10 +29,11 @@ DATA_SOURCE_QUEUE = 'REDIS_QUEUE'
 DATA_SOURCE_DB = 'DB'
 
 REDIS_OBJECT_FEATURE_QUEUE = 'bl:object:feature:queue'
+REDIS_OBJECT_INDEX_QUEUE = 'bl:object:index:queue'
 REDIS_OBJECT_LIST = 'bl:object:list'
 REDIS_OBJECT_HASH = 'bl:object:hash'
 
-SPAWN_NUMBER = 2
+SPAWNING_CRITERIA = 50
 
 AWS_BUCKET = 'bluelens-style-index'
 INDEX_FILE = 'faiss2.index'
@@ -160,10 +161,14 @@ def load_from_queue(index_file):
     # ToDo:
     # save_to_db()
 
-if __name__ == '__main__':
-  for i in range(3):
-    spawn_indexer(str(i))
-    time.sleep(10)
+def dispatch_indexer(rconn):
+  while True:
+    len = rconn.llen(REDIS_OBJECT_INDEX_QUEUE)
+    if len > 0:
+      spawn_indexer(str(uuid.uuid4()))
+    time.sleep(60)
 
+if __name__ == '__main__':
+  Process(target=dispatch_indexer, args=(rconn,)).start()
   start_index()
 

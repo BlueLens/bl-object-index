@@ -60,6 +60,7 @@ def spawn_indexer(uuid):
   pool.setMetadataName(project_name)
   pool.setMetadataNamespace('index')
   pool.addMetadataLabel('name', project_name)
+  pool.addMetadataLabel('group', 'bl-image-indexer')
   pool.addMetadataLabel('SPAWN_ID', uuid)
   container = pool.createContainer()
   pool.setContainerName(container, project_name)

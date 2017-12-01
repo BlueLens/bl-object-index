@@ -33,10 +33,11 @@ REDIS_OBJECT_INDEX_QUEUE = 'bl:object:index:queue'
 REDIS_OBJECT_LIST = 'bl:object:list'
 REDIS_OBJECT_HASH = 'bl:object:hash'
 
+
 SPAWNING_CRITERIA = 50
 
 AWS_BUCKET = 'bluelens-style-index'
-INDEX_FILE = 'faiss2.index'
+INDEX_FILE = 'faiss.index'
 
 options = {
   'REDIS_SERVER': REDIS_SERVER,
@@ -139,6 +140,7 @@ def load_from_queue(index_file):
 
     # xb = np.array(features)
     id_num = rconn.llen(REDIS_OBJECT_LIST)
+    log.debug(id_num)
     id_array = []
     id_array.append(id_num)
     id_set = np.array(id_array)

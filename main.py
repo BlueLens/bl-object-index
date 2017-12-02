@@ -133,14 +133,13 @@ def load_from_queue(index_file):
     feature = obj['feature']
     xb = np.expand_dims(np.array(feature, dtype=np.float32), axis=0)
     obj['feature'] = None
-    log.debug(obj)
     rconn.rpush(REDIS_OBJECT_LIST, obj['name'])
     d = pickle.dumps(obj)
     rconn.hset(REDIS_OBJECT_HASH, obj['name'], obj['product_id'])
 
     # xb = np.array(features)
     id_num = rconn.llen(REDIS_OBJECT_LIST)
-    log.debug(id_num)
+    # log.debug(id_num)
     id_array = []
     id_array.append(id_num)
     id_set = np.array(id_array)

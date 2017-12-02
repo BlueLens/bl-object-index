@@ -199,3 +199,4 @@ if __name__ == '__main__':
   p2.start()
   pids.append(p2.pid)
   Process(target=restart, args=(rconn, pids)).start()
+

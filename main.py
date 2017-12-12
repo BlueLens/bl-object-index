@@ -24,6 +24,7 @@ AWS_SECRET_ACCESS_KEY = os.environ['AWS_SECRET_ACCESS_KEY']
 
 REDIS_SERVER = os.environ['REDIS_SERVER']
 REDIS_PASSWORD = os.environ['REDIS_PASSWORD']
+RELEASE_MODE = os.environ['RELEASE_MODE']
 
 DATA_SOURCE = os.environ['DATA_SOURCE']
 DATA_SOURCE_QUEUE = 'REDIS_QUEUE'
@@ -62,7 +63,7 @@ def spawn_indexer(uuid):
   pool.setApiVersion('v1')
   pool.setKind('Pod')
   pool.setMetadataName(project_name)
-  pool.setMetadataNamespace('index')
+  pool.setMetadataNamespace(RELEASE_MODE)
   pool.addMetadataLabel('name', project_name)
   pool.addMetadataLabel('group', 'bl-image-indexer')
   pool.addMetadataLabel('SPAWN_ID', uuid)
@@ -73,7 +74,8 @@ def spawn_indexer(uuid):
   pool.addContainerEnv(container, 'REDIS_SERVER', REDIS_SERVER)
   pool.addContainerEnv(container, 'REDIS_PASSWORD', REDIS_PASSWORD)
   pool.addContainerEnv(container, 'SPAWN_ID', uuid)
-  pool.setContainerImage(container, 'bluelens/bl-image-indexer:latest')
+  pool.addContainerEnv(container, 'RELEASE_MODE', RELEASE_MODE)
+  pool.setContainerImage(container, 'bluelens/bl-image-indexer:' + RELEASE_MODE)
   pool.addContainer(container)
   pool.setRestartPolicy('Never')
   pool.spawn()

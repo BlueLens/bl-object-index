@@ -8,5 +8,6 @@ FEATURE_GRPC_PORT=50051
 
 sudo nvidia-docker run -dit --restart unless-stopped \
     -e RELEASE_MODE=$RELEASE_MODE \
+    -e FEATURE_GRPC_HOST=$FEATURE_GRPC_HOST \
     -e FEATURE_GRPC_PORT=$FEATURE_GRPC_PORT \
     bluelens/bl-index:$RELEASE_MODE

@@ -1,3 +1,8 @@
 #!/usr/bin/env bash
 
-sudo nvidia-docker run -dit --restart unless-stopped -p 30053:30053 bluelens/bl-index:dev
+RELEASE_MODE='prod'
+PORT=30053
+
+sudo nvidia-docker run -dit --restart unless-stopped \
+    -e RELEASE_MODE=$RELEASE_MODE \
+    -p $PORT:$PORT bluelens/bl-index:$RELEASE_MODE

@@ -40,7 +40,7 @@ REDIS_INDEX_RESTART_QUEUE = 'bl:index:restart:queue'
 SPAWNING_CRITERIA = 50
 
 AWS_BUCKET = 'bluelens-style-index'
-INDEX_FILE = 'faiss.index'
+INDEX_FILE = RELEASE_MODE + '/faiss.index'
 
 options = {
   'REDIS_SERVER': REDIS_SERVER,

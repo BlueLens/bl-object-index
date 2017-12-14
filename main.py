@@ -25,6 +25,8 @@ AWS_SECRET_ACCESS_KEY = os.environ['AWS_SECRET_ACCESS_KEY']
 REDIS_SERVER = os.environ['REDIS_SERVER']
 REDIS_PASSWORD = os.environ['REDIS_PASSWORD']
 RELEASE_MODE = os.environ['RELEASE_MODE']
+FEATURE_GRPC_HOST = os.environ['FEATURE_GRPC_HOST']
+FEATURE_GRPC_PORT = os.environ['FEATURE_GRPC_PORT']
 DATA_SOURCE = os.environ['DATA_SOURCE']
 DATA_SOURCE_QUEUE = 'REDIS_QUEUE'
 DATA_SOURCE_DB = 'DB'
@@ -40,7 +42,7 @@ REDIS_INDEX_RESTART_QUEUE = 'bl:index:restart:queue'
 SPAWNING_CRITERIA = 50
 
 AWS_BUCKET = 'bluelens-style-index'
-INDEX_FILE = RELEASE_MODE + '/faiss.index'
+INDEX_FILE = 'faiss.index'
 
 options = {
   'REDIS_SERVER': REDIS_SERVER,
@@ -74,6 +76,8 @@ def spawn_indexer(uuid):
   pool.addContainerEnv(container, 'REDIS_PASSWORD', REDIS_PASSWORD)
   pool.addContainerEnv(container, 'SPAWN_ID', uuid)
   pool.addContainerEnv(container, 'RELEASE_MODE', RELEASE_MODE)
+  pool.addContainerEnv(container, 'FEATURE_GRPC_HOST', FEATURE_GRPC_HOST)
+  pool.addContainerEnv(container, 'FEATURE_GRPC_PORT', FEATURE_GRPC_PORT)
   pool.setContainerImage(container, 'bluelens/bl-image-indexer:' + RELEASE_MODE)
   pool.addContainer(container)
   pool.setRestartPolicy('Never')
@@ -93,12 +97,12 @@ def load_from_db():
 
 def save_index_file(file):
   log.info('save_index_file')
-  storage.upload_file_to_bucket(AWS_BUCKET, file, INDEX_FILE, is_public=True)
+  storage.upload_file_to_bucket(AWS_BUCKET, file, RELEASE_MODE + '/' + INDEX_FILE, is_public=True)
 
 def load_index_file(file):
   log.info('load_index_file')
   try:
-    storage.download_file_from_bucket(AWS_BUCKET, file, INDEX_FILE)
+    storage.download_file_from_bucket(AWS_BUCKET, file, RELEASE_MODE + '/' + INDEX_FILE)
   except:
     log.error('download error')
     file = None
@@ -158,8 +162,8 @@ def load_from_queue(index_file):
     index2.add_with_ids(xb, id_set)
     elapsed_time = time.time() - start_time
     # log.info('indexing time: ' + str(elapsed_time))
-    file = os.path.join(os.getcwd(), INDEX_FILE)
     if i % 50 == 0:
+      file = os.path.join(os.getcwd(), INDEX_FILE)
       faiss.write_index(index2, file)
       save_index_file(file)
     i = i + 1

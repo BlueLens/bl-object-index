@@ -25,7 +25,6 @@ AWS_SECRET_ACCESS_KEY = os.environ['AWS_SECRET_ACCESS_KEY']
 REDIS_SERVER = os.environ['REDIS_SERVER']
 REDIS_PASSWORD = os.environ['REDIS_PASSWORD']
 RELEASE_MODE = os.environ['RELEASE_MODE']
-
 DATA_SOURCE = os.environ['DATA_SOURCE']
 DATA_SOURCE_QUEUE = 'REDIS_QUEUE'
 DATA_SOURCE_DB = 'DB'
@@ -158,13 +157,13 @@ def load_from_queue(index_file):
     start_time = time.time()
     index2.add_with_ids(xb, id_set)
     elapsed_time = time.time() - start_time
-    log.info('indexing time: ' + str(elapsed_time))
+    # log.info('indexing time: ' + str(elapsed_time))
     file = os.path.join(os.getcwd(), INDEX_FILE)
     if i % 50 == 0:
       faiss.write_index(index2, file)
       save_index_file(file)
     i = i + 1
-    log.info('index done')
+    # log.info('index done')
 
     # ToDo:
     # save_to_db()

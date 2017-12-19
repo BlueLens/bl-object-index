@@ -48,6 +48,7 @@ REDIS_INDEX_RESTART_QUEUE = 'bl:index:restart:queue'
 
 
 SPAWNING_CRITERIA = 50
+INTERVAL_TIME = 60
 
 AWS_BUCKET = 'bluelens-style-index'
 INDEX_FILE = 'faiss.index'
@@ -137,6 +138,10 @@ def load_from_db(index_file):
   try:
     while True:
       res = object_api.get_objects_with_null_index(offset=offset, limit=limit)
+
+      if len(res) == 0:
+        time.sleep(INTERVAL_TIME)
+        continue
 
       objects = []
       for obj in res:

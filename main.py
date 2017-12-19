@@ -11,6 +11,7 @@ import redis
 import os
 from util import s3
 from bluelens_spawning_pool import spawning_pool
+from stylelens_object.objects import Objects
 from bluelens_log import Logging
 
 STR_BUCKET = "bucket"
@@ -59,6 +60,8 @@ log = Logging(options, tag='bl-object-index')
 rconn = redis.StrictRedis(REDIS_SERVER, port=6379, password=REDIS_PASSWORD)
 storage = s3.S3(AWS_ACCESS_KEY, AWS_SECRET_ACCESS_KEY)
 
+object_api = None
+
 def spawn_indexer(uuid):
 
   pool = spawning_pool.SpawningPool()
@@ -95,17 +98,69 @@ def spawn_indexer(uuid):
   pool.setRestartPolicy('Never')
   pool.spawn()
 
+def save_objects_to_db(objects):
+  log.info('save_object_to_db')
+  global object_api
+  try:
+    api_response = object_api.update_objects(objects)
+    log.debug(api_response)
+  except Exception as e:
+    log.warn("Exception when calling update_object: %s\n" % e)
+
 def start_index(rconn):
+  global  object_api
+  object_api = Objects()
   file = os.path.join(os.getcwd(), INDEX_FILE)
-  index_file = load_index_file(file)
+  # index_file = load_index_file(file)
+  index_file = None
   if DATA_SOURCE == DATA_SOURCE_QUEUE:
     load_from_queue(index_file)
   elif DATA_SOURCE == DATA_SOURCE_DB:
     load_from_db(index_file)
 
-def load_from_db():
+def load_from_db(index_file):
   log.info('load_from_db')
-  # Need to implement
+  VECTOR_SIZE = 2048
+
+  if index_file is None:
+    log.debug('Create a new index file')
+    index = faiss.IndexFlatL2(VECTOR_SIZE)
+    index2 = faiss.IndexIDMap(index)
+  else:
+    log.debug('Load from index file')
+    index2 = faiss.read_index(index_file)
+
+  offset = 0
+  limit = 50
+  id_num = 1
+
+  try:
+    while True:
+      res = object_api.get_objects_with_null_index(offset=offset, limit=limit)
+
+      objects = []
+      for obj in res:
+        xb = np.expand_dims(np.array(obj['feature'], dtype=np.float32), axis=0)
+        id_array = []
+        id_array.append(id_num)
+        id_set = np.array(id_array)
+        index2.add_with_ids(xb, id_set)
+
+        new_obj = {}
+        new_obj['name'] = obj['name']
+        new_obj['index'] = id_num
+        objects.append(new_obj)
+        id_num = id_num + 1
+
+      save_objects_to_db(objects)
+
+      if limit > len(res):
+        break
+      else:
+        offset = offset + limit
+
+  except Exception as e:
+    log.error(str(e))
 
 def save_index_file(file):
   log.info('save_index_file')

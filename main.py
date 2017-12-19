@@ -28,6 +28,13 @@ RELEASE_MODE = os.environ['RELEASE_MODE']
 FEATURE_GRPC_HOST = os.environ['FEATURE_GRPC_HOST']
 FEATURE_GRPC_PORT = os.environ['FEATURE_GRPC_PORT']
 DATA_SOURCE = os.environ['DATA_SOURCE']
+
+DB_OBJECT_HOST = os.environ['DB_OBJECT_HOST']
+DB_OBJECT_PORT = os.environ['DB_OBJECT_PORT']
+DB_OBJECT_NAME = os.environ['DB_OBJECT_NAME']
+DB_OBJECT_USER = os.environ['DB_OBJECT_USER']
+DB_OBJECT_PASSWORD = os.environ['DB_OBJECT_PASSWORD']
+
 DATA_SOURCE_QUEUE = 'REDIS_QUEUE'
 DATA_SOURCE_DB = 'DB'
 
@@ -48,7 +55,7 @@ options = {
   'REDIS_SERVER': REDIS_SERVER,
   'REDIS_PASSWORD': REDIS_PASSWORD
 }
-log = Logging(options, tag='bl-index')
+log = Logging(options, tag='bl-object-index')
 rconn = redis.StrictRedis(REDIS_SERVER, port=6379, password=REDIS_PASSWORD)
 storage = s3.S3(AWS_ACCESS_KEY, AWS_SECRET_ACCESS_KEY)
 
@@ -78,6 +85,11 @@ def spawn_indexer(uuid):
   pool.addContainerEnv(container, 'RELEASE_MODE', RELEASE_MODE)
   pool.addContainerEnv(container, 'FEATURE_GRPC_HOST', FEATURE_GRPC_HOST)
   pool.addContainerEnv(container, 'FEATURE_GRPC_PORT', FEATURE_GRPC_PORT)
+  pool.addContainerEnv(container, 'DB_OBJECT_HOST', DB_OBJECT_HOST)
+  pool.addContainerEnv(container, 'DB_OBJECT_PORT', DB_OBJECT_PORT)
+  pool.addContainerEnv(container, 'DB_OBJECT_USER', DB_OBJECT_USER)
+  pool.addContainerEnv(container, 'DB_OBJECT_PASSWORD', DB_OBJECT_PASSWORD)
+  pool.addContainerEnv(container, 'DB_OBJECT_NAME', DB_OBJECT_NAME)
   pool.setContainerImage(container, 'bluelens/bl-image-indexer:' + RELEASE_MODE)
   pool.addContainer(container)
   pool.setRestartPolicy('Never')

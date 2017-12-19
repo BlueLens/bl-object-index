@@ -198,5 +198,6 @@ venv.bak/
 .mypy_cache/
 
 grpc/tmp.jpg
-Dockerfile
 !faiss/*.so
+run_dev.sh
+run_prod.sh

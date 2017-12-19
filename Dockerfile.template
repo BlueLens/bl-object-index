@@ -1,4 +1,4 @@
-FROM bluelens/bl-index-base:latest
+FROM bluelens/bl-object-index-base:latest
 
 
 RUN mkdir /usr/src/app

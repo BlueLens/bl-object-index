@@ -43,6 +43,8 @@ REDIS_OBJECT_FEATURE_QUEUE = 'bl:object:feature:queue'
 REDIS_OBJECT_INDEX_QUEUE = 'bl:object:index:queue'
 REDIS_OBJECT_LIST = 'bl:object:list'
 REDIS_OBJECT_HASH = 'bl:object:hash'
+REDIS_CRAWL_VERSION = 'bl:crawl:version'
+REDIS_CRAWL_VERSION_LATEST = 'latest'
 
 REDIS_INDEX_RESTART_QUEUE = 'bl:index:restart:queue'
 
@@ -62,6 +64,7 @@ rconn = redis.StrictRedis(REDIS_SERVER, port=6379, password=REDIS_PASSWORD)
 storage = s3.S3(AWS_ACCESS_KEY, AWS_SECRET_ACCESS_KEY)
 
 object_api = None
+version_id = None
 
 def spawn_indexer(uuid):
 
@@ -110,7 +113,9 @@ def save_objects_to_db(objects):
 
 def start_index(rconn):
   global  object_api
+  global version_id
   object_api = Objects()
+  version_id = get_latest_crawl_version()
   file = os.path.join(os.getcwd(), INDEX_FILE)
   # index_file = load_index_file(file)
   index_file = None
@@ -137,7 +142,7 @@ def load_from_db(index_file):
 
   try:
     while True:
-      res = object_api.get_objects_with_null_index(offset=offset, limit=limit)
+      res = object_api.get_objects_with_null_index(version_id=version_id, offset=offset, limit=limit)
 
       if len(res) == 0:
         time.sleep(INTERVAL_TIME)
@@ -243,6 +248,11 @@ def load_from_queue(index_file):
 
     # ToDo:
     # save_to_db()
+
+def get_latest_crawl_version():
+  value = rconn.hget(REDIS_CRAWL_VERSION, REDIS_CRAWL_VERSION_LATEST)
+  version_id = value.decode("utf-8")
+  return version_id
 
 def dispatch_indexer(rconn):
   def request_stop(signum, frame):

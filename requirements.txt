@@ -1,8 +1,8 @@
 bluelens-log==1.0.2
-bluelens-spawning-pool==1.0.9
+bluelens-spawning-pool==1.0.10
 boto3==1.4.7
 botocore==1.7.47
-certifi==2016.2.28
+certifi==2017.11.5
 docutils==0.14
 jmespath==0.9.3
 numpy==1.13.3
@@ -11,5 +11,5 @@ python-dateutil==2.6.1
 redis==2.10.6
 s3transfer==0.1.11
 six==1.11.0
-stylelens-object==0.0.10
+stylelens-object==0.0.12
 urllib3==1.22

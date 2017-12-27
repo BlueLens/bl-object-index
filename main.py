@@ -49,7 +49,6 @@ REDIS_CRAWL_VERSION_LATEST = 'latest'
 REDIS_INDEX_RESTART_QUEUE = 'bl:index:restart:queue'
 
 
-SPAWNING_CRITERIA = 50
 INTERVAL_TIME = 60
 
 AWS_BUCKET = 'bluelens-style-index'
@@ -70,7 +69,7 @@ def spawn_indexer(uuid):
 
   pool = spawning_pool.SpawningPool()
 
-  project_name = 'bl-image-indexer-' + uuid
+  project_name = 'bl-object-indexer-' + uuid
   log.info('spawn_indexer: ' + project_name)
 
   pool.setServerUrl(REDIS_SERVER)
@@ -80,7 +79,7 @@ def spawn_indexer(uuid):
   pool.setMetadataName(project_name)
   pool.setMetadataNamespace(RELEASE_MODE)
   pool.addMetadataLabel('name', project_name)
-  pool.addMetadataLabel('group', 'bl-image-indexer')
+  pool.addMetadataLabel('group', 'bl-object-indexer')
   pool.addMetadataLabel('SPAWN_ID', uuid)
   container = pool.createContainer()
   pool.setContainerName(container, project_name)
@@ -97,7 +96,8 @@ def spawn_indexer(uuid):
   pool.addContainerEnv(container, 'DB_OBJECT_USER', DB_OBJECT_USER)
   pool.addContainerEnv(container, 'DB_OBJECT_PASSWORD', DB_OBJECT_PASSWORD)
   pool.addContainerEnv(container, 'DB_OBJECT_NAME', DB_OBJECT_NAME)
-  pool.setContainerImage(container, 'bluelens/bl-image-indexer:' + RELEASE_MODE)
+  pool.setContainerImage(container, 'bluelens/bl-object-indexer:' + RELEASE_MODE)
+  pool.setContainerImagePullPolicy(container, 'Always')
   pool.addContainer(container)
   pool.setRestartPolicy('Never')
   pool.spawn()
@@ -119,12 +119,21 @@ def start_index(rconn):
   file = os.path.join(os.getcwd(), INDEX_FILE)
   # index_file = load_index_file(file)
   index_file = None
+
+  reset_index(version_id)
+
   if DATA_SOURCE == DATA_SOURCE_QUEUE:
     load_from_queue(index_file)
   elif DATA_SOURCE == DATA_SOURCE_DB:
-    load_from_db(index_file)
+    load_from_db(index_file, version_id)
 
-def load_from_db(index_file):
+def reset_index(version_id):
+  try:
+    object_api.reset_index(version_id=version_id)
+  except Exception as e:
+    log.error(str(e))
+
+def load_from_db(index_file, version_id):
   log.info('load_from_db')
   VECTOR_SIZE = 2048
 
@@ -136,13 +145,12 @@ def load_from_db(index_file):
     log.debug('Load from index file')
     index2 = faiss.read_index(index_file)
 
-  offset = 0
-  limit = 50
+  limit = 200
   id_num = 1
 
   try:
     while True:
-      res = object_api.get_objects_with_null_index(version_id=version_id, offset=offset, limit=limit)
+      res = object_api.get_objects_with_null_index(version_id=version_id, offset=0, limit=limit)
 
       if len(res) == 0:
         time.sleep(INTERVAL_TIME)
@@ -163,11 +171,11 @@ def load_from_db(index_file):
         id_num = id_num + 1
 
       save_objects_to_db(objects)
+      file = os.path.join(os.getcwd(), INDEX_FILE)
+      faiss.write_index(index2, file)
+      save_index_file(file)
 
-      if limit > len(res):
-        break
-      else:
-        offset = offset + limit
+      spawn_indexer(str(uuid.uuid4()))
 
   except Exception as e:
     log.error(str(e))
@@ -254,22 +262,6 @@ def get_latest_crawl_version():
   version_id = value.decode("utf-8")
   return version_id
 
-def dispatch_indexer(rconn):
-  def request_stop(signum, frame):
-    log.info('stopping')
-    rconn.connection_pool.disconnect()
-    log.info('connection closed')
-    sys.exit()
-
-  signal.signal(signal.SIGINT, request_stop)
-  signal.signal(signal.SIGTERM, request_stop)
-
-  while True:
-    len = rconn.llen(REDIS_OBJECT_INDEX_QUEUE)
-    if len > 0:
-      spawn_indexer(str(uuid.uuid4()))
-    time.sleep(60)
-
 def restart(rconn, pids):
   while True:
     key, value = rconn.blpop([REDIS_INDEX_RESTART_QUEUE])
@@ -279,10 +271,7 @@ def restart(rconn, pids):
 
 if __name__ == '__main__':
   pids = []
-  p1 = Process(target=dispatch_indexer, args=(rconn,))
+  p1 = Process(target=start_index, args=(rconn,))
   p1.start()
   pids.append(p1.pid)
-  p2 = Process(target=start_index, args=(rconn,))
-  p2.start()
-  pids.append(p2.pid)
   Process(target=restart, args=(rconn, pids)).start()

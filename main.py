@@ -115,17 +115,22 @@ def start_index(rconn):
   global  object_api
   global version_id
   object_api = Objects()
-  version_id = get_latest_crawl_version()
   file = os.path.join(os.getcwd(), INDEX_FILE)
   # index_file = load_index_file(file)
-  index_file = None
 
-  reset_index(version_id)
+  while True:
+    version_id = get_latest_crawl_version()
+    if version_id is None:
+      time.sleep(300)
+    else:
+      index_file = None
 
-  if DATA_SOURCE == DATA_SOURCE_QUEUE:
-    load_from_queue(index_file)
-  elif DATA_SOURCE == DATA_SOURCE_DB:
-    load_from_db(index_file, version_id)
+      reset_index(version_id)
+
+      if DATA_SOURCE == DATA_SOURCE_QUEUE:
+        load_from_queue(index_file)
+      elif DATA_SOURCE == DATA_SOURCE_DB:
+        load_from_db(index_file, version_id)
 
 def reset_index(version_id):
   try:
@@ -158,7 +163,8 @@ def load_from_db(index_file, version_id):
 
       objects = []
       for obj in res:
-        xb = np.expand_dims(np.array(obj['feature'], dtype=np.float32), axis=0)
+        feature = np.fromstring(obj['feature'], dtype=np.float32)
+        xb = np.expand_dims(np.array(feature, dtype=np.float32), axis=0)
         id_array = []
         id_array.append(id_num)
         id_set = np.array(id_array)
@@ -259,8 +265,9 @@ def load_from_queue(index_file):
 
 def get_latest_crawl_version():
   value = rconn.hget(REDIS_CRAWL_VERSION, REDIS_CRAWL_VERSION_LATEST)
-  version_id = value.decode("utf-8")
-  return version_id
+  if value is not None:
+    return value.decode("utf-8")
+  return None
 
 def restart(rconn, pids):
   while True:

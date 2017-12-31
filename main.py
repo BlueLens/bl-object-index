@@ -20,6 +20,8 @@ STR_CLASS_CODE = "class_code"
 STR_NAME = "name"
 STR_FORMAT = "format"
 
+SPAWN_MAX = 100
+
 AWS_ACCESS_KEY = os.environ['AWS_ACCESS_KEY']
 AWS_SECRET_ACCESS_KEY = os.environ['AWS_SECRET_ACCESS_KEY']
 
@@ -150,8 +152,10 @@ def load_from_db(index_file, version_id):
     log.debug('Load from index file')
     index2 = faiss.read_index(index_file)
 
-  limit = 200
+  limit = 300
   id_num = 1
+
+  spawn_counter = 0
 
   try:
     while True:
@@ -181,7 +185,11 @@ def load_from_db(index_file, version_id):
       faiss.write_index(index2, file)
       save_index_file(file)
 
-      spawn_indexer(str(uuid.uuid4()))
+      if len(res) > 200:
+        spawn_indexer(str(uuid.uuid4()))
+        time.sleep(60*10)
+
+      spawn_counter = spawn_counter + 1
 
   except Exception as e:
     log.error(str(e))

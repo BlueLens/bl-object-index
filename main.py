@@ -12,6 +12,8 @@ import os
 from util import s3
 from bluelens_spawning_pool import spawning_pool
 from stylelens_object.objects import Objects
+from stylelens_product.products import Products
+from stylelens_product.crawls import Crawls
 from bluelens_log import Logging
 
 STR_BUCKET = "bucket"
@@ -19,8 +21,6 @@ STR_STORAGE = "storage"
 STR_CLASS_CODE = "class_code"
 STR_NAME = "name"
 STR_FORMAT = "format"
-
-SPAWN_MAX = 100
 
 AWS_ACCESS_KEY = os.environ['AWS_ACCESS_KEY']
 AWS_SECRET_ACCESS_KEY = os.environ['AWS_SECRET_ACCESS_KEY']
@@ -31,6 +31,8 @@ RELEASE_MODE = os.environ['RELEASE_MODE']
 FEATURE_GRPC_HOST = os.environ['FEATURE_GRPC_HOST']
 FEATURE_GRPC_PORT = os.environ['FEATURE_GRPC_PORT']
 DATA_SOURCE = os.environ['DATA_SOURCE']
+MAX_PROCESS_NUM = int(os.environ['MAX_PROCESS_NUM'])
+
 
 DB_OBJECT_HOST = os.environ['DB_OBJECT_HOST']
 DB_OBJECT_PORT = os.environ['DB_OBJECT_PORT']
@@ -65,9 +67,11 @@ rconn = redis.StrictRedis(REDIS_SERVER, port=6379, password=REDIS_PASSWORD)
 storage = s3.S3(AWS_ACCESS_KEY, AWS_SECRET_ACCESS_KEY)
 
 object_api = None
+product_api = None
+crawl_api = None
 version_id = None
 
-def spawn_indexer(uuid):
+def spawn(uuid):
 
   pool = spawning_pool.SpawningPool()
 
@@ -90,6 +94,7 @@ def spawn_indexer(uuid):
   pool.addContainerEnv(container, 'REDIS_SERVER', REDIS_SERVER)
   pool.addContainerEnv(container, 'REDIS_PASSWORD', REDIS_PASSWORD)
   pool.addContainerEnv(container, 'SPAWN_ID', uuid)
+  pool.addContainerEnv(container, 'MAX_PROCESS_NUM', str(MAX_PROCESS_NUM))
   pool.addContainerEnv(container, 'RELEASE_MODE', RELEASE_MODE)
   pool.addContainerEnv(container, 'FEATURE_GRPC_HOST', FEATURE_GRPC_HOST)
   pool.addContainerEnv(container, 'FEATURE_GRPC_PORT', FEATURE_GRPC_PORT)
@@ -113,26 +118,6 @@ def save_objects_to_db(objects):
   except Exception as e:
     log.warn("Exception when calling update_object: %s\n" % e)
 
-def start_index(rconn):
-  global  object_api
-  global version_id
-  object_api = Objects()
-  file = os.path.join(os.getcwd(), INDEX_FILE)
-  # index_file = load_index_file(file)
-
-  while True:
-    version_id = get_latest_crawl_version()
-    if version_id is None:
-      time.sleep(300)
-    else:
-      index_file = None
-
-      reset_index(version_id)
-
-      if DATA_SOURCE == DATA_SOURCE_QUEUE:
-        load_from_queue(index_file)
-      elif DATA_SOURCE == DATA_SOURCE_DB:
-        load_from_db(index_file, version_id)
 
 def reset_index(version_id):
   try:
@@ -155,7 +140,7 @@ def load_from_db(index_file, version_id):
   limit = 300
   id_num = 1
 
-  spawn_counter = 0
+  counter = 0
 
   try:
     while True:
@@ -185,11 +170,7 @@ def load_from_db(index_file, version_id):
       faiss.write_index(index2, file)
       save_index_file(file)
 
-      if len(res) > 200:
-        spawn_indexer(str(uuid.uuid4()))
-        time.sleep(60*10)
-
-      spawn_counter = spawn_counter + 1
+      counter = counter + limit
 
   except Exception as e:
     log.error(str(e))
@@ -277,6 +258,113 @@ def get_latest_crawl_version():
     return value.decode("utf-8")
   return None
 
+def check_condition_to_start(version_id):
+  global product_api
+  global object_api
+  global crawl_api
+
+  try:
+    # Check Crawling process is done
+    total_crawl_size = crawl_api.get_size_crawls(version_id)
+    crawled_size = crawl_api.get_size_crawls(version_id, status='done')
+    if total_crawl_size != crawled_size:
+      return False
+
+    # Check Image processing process is done
+    total_product_size = product_api.get_size_products(version_id)
+    processed_size = product_api.get_size_products(version_id, is_processed=True)
+    if total_product_size != processed_size:
+      return False
+
+    # Check Object classifying process is done
+    total_object_size = object_api.get_size_objects(version_id)
+    classified_size = object_api.get_size_objects(version_id, is_classified=True)
+    if total_object_size != classified_size:
+      return False
+
+    # Check Object indexing process is done
+    queue_size = rconn.llen(REDIS_OBJECT_INDEX_QUEUE)
+    if queue_size != 0:
+      return False
+
+  except Exception as e:
+    log.error(str(e))
+
+  return True
+
+def prepare_objects_to_index(rconn, version_id):
+  global object_api
+  offset = 0
+  limit = 100
+
+  rconn.delete(REDIS_OBJECT_INDEX_QUEUE)
+  try:
+    log.debug("prepare_objects_to_index")
+    while True:
+      res = object_api.get_objects_with_null_feature(version_id=version_id,
+                                                     offset=offset,
+                                                     limit=limit)
+      log.debug("Got " + str(len(res)) + ' objects')
+      for product in res:
+        rconn.lpush(REDIS_OBJECT_INDEX_QUEUE, pickle.dumps(product))
+
+      if limit > len(res):
+        break
+      else:
+        offset = offset + limit
+
+  except Exception as e:
+    log.error(str(e))
+
+def dispatch(rconn):
+  global product_api
+
+  size = rconn.llen(REDIS_OBJECT_INDEX_QUEUE)
+
+  if size > 0 and size < MAX_PROCESS_NUM:
+    for i in range(10):
+      spawn(str(uuid.uuid4()))
+
+  if size >= MAX_PROCESS_NUM and size < MAX_PROCESS_NUM * 10:
+    for i in range(100):
+      spawn(str(uuid.uuid4()))
+
+  elif size >= MAX_PROCESS_NUM * 100:
+    for i in range(300):
+      spawn(str(uuid.uuid4()))
+
+def start(rconn):
+  global  object_api
+  global product_api
+  global crawl_api
+  global version_id
+
+  try:
+    log.info("Start bl-object-index:1")
+
+    object_api = Objects()
+    product_api = Products()
+    crawl_api = Crawls()
+    file = os.path.join(os.getcwd(), INDEX_FILE)
+    # index_file = load_index_file(file)
+
+    while True:
+      version_id = get_latest_crawl_version()
+      if version_id is not None:
+        index_file = None
+        reset_index(version_id)
+        prepare_objects_to_index(rconn, version_id)
+        dispatch(rconn)
+
+        if DATA_SOURCE == DATA_SOURCE_QUEUE:
+          load_from_queue(index_file)
+        elif DATA_SOURCE == DATA_SOURCE_DB:
+          load_from_db(index_file, version_id)
+
+      time.sleep(60*10)
+  except Exception as e:
+    log.error(str(e))
+
 def restart(rconn, pids):
   while True:
     key, value = rconn.blpop([REDIS_INDEX_RESTART_QUEUE])
@@ -286,7 +374,7 @@ def restart(rconn, pids):
 
 if __name__ == '__main__':
   pids = []
-  p1 = Process(target=start_index, args=(rconn,))
+  p1 = Process(target=start, args=(rconn,))
   p1.start()
   pids.append(p1.pid)
   Process(target=restart, args=(rconn, pids)).start()

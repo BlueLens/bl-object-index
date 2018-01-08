@@ -110,11 +110,11 @@ def spawn(uuid):
   pool.spawn()
 
 def save_objects_to_db(objects):
-  log.info('save_object_to_db')
+  # log.info('save_object_to_db')
   global object_api
   try:
     api_response = object_api.update_objects(objects)
-    log.debug(api_response)
+    # log.debug(api_response)
   except Exception as e:
     log.warn("Exception when calling update_object: %s\n" % e)
 
@@ -142,11 +142,14 @@ def load_from_db(index_file, version_id):
 
   counter = 0
 
+  file = os.path.join(os.getcwd(), INDEX_FILE)
+
   try:
     while True:
       res = object_api.get_objects_with_null_index(version_id=version_id, offset=0, limit=limit)
 
       if len(res) == 0:
+        save_index_file(file)
         time.sleep(INTERVAL_TIME)
         continue
 
@@ -166,9 +169,7 @@ def load_from_db(index_file, version_id):
         id_num = id_num + 1
 
       save_objects_to_db(objects)
-      file = os.path.join(os.getcwd(), INDEX_FILE)
       faiss.write_index(index2, file)
-      save_index_file(file)
 
       counter = counter + limit
 
@@ -242,7 +243,7 @@ def load_from_queue(index_file):
     index2.add_with_ids(xb, id_set)
     elapsed_time = time.time() - start_time
     # log.info('indexing time: ' + str(elapsed_time))
-    if i % 50 == 0:
+    if i % 10000 == 0:
       file = os.path.join(os.getcwd(), INDEX_FILE)
       faiss.write_index(index2, file)
       save_index_file(file)
@@ -258,39 +259,15 @@ def get_latest_crawl_version():
     return value.decode("utf-8")
   return None
 
-def check_condition_to_start(version_id):
-  global product_api
-  global object_api
-  global crawl_api
-
-  try:
-    # Check Crawling process is done
-    total_crawl_size = crawl_api.get_size_crawls(version_id)
-    crawled_size = crawl_api.get_size_crawls(version_id, status='done')
-    if total_crawl_size != crawled_size:
-      return False
-
-    # Check Image processing process is done
-    total_product_size = product_api.get_size_products(version_id)
-    processed_size = product_api.get_size_products(version_id, is_processed=True)
-    if total_product_size != processed_size:
-      return False
-
-    # Check Object classifying process is done
-    total_object_size = object_api.get_size_objects(version_id)
-    classified_size = object_api.get_size_objects(version_id, is_classified=True)
-    if total_object_size != classified_size:
-      return False
-
-    # Check Object indexing process is done
-    queue_size = rconn.llen(REDIS_OBJECT_INDEX_QUEUE)
-    if queue_size != 0:
-      return False
-
-  except Exception as e:
-    log.error(str(e))
-
-  return True
+def remove_prev_pods():
+  pool = spawning_pool.SpawningPool()
+  pool.setServerUrl(REDIS_SERVER)
+  pool.setServerPassword(REDIS_PASSWORD)
+  data = {}
+  data['key'] = 'group'
+  data['value'] = 'bl-object-indexer'
+  pool.delete(data)
+  time.sleep(60)
 
 def prepare_objects_to_index(rconn, version_id):
   global object_api
@@ -298,6 +275,7 @@ def prepare_objects_to_index(rconn, version_id):
   limit = 100
 
   rconn.delete(REDIS_OBJECT_INDEX_QUEUE)
+  remove_prev_pods()
   try:
     log.debug("prepare_objects_to_index")
     while True:
@@ -316,6 +294,28 @@ def prepare_objects_to_index(rconn, version_id):
   except Exception as e:
     log.error(str(e))
 
+def check_condition_to_start(version_id):
+  global product_api
+
+  product_api = Products()
+
+  try:
+    # Check Classifying processing process is done
+    total_product_size = product_api.get_size_products(version_id)
+    classified_size = product_api.get_size_products(version_id, is_classified=True)
+    if total_product_size != classified_size:
+      return False
+
+    # Check Object classifying process is done
+    queue_size = rconn.llen(REDIS_OBJECT_INDEX_QUEUE)
+    if queue_size != 0:
+      return False
+
+  except Exception as e:
+    log.error(str(e))
+
+  return True
+
 def dispatch(rconn):
   global product_api
 
@@ -326,17 +326,16 @@ def dispatch(rconn):
       spawn(str(uuid.uuid4()))
 
   if size >= MAX_PROCESS_NUM and size < MAX_PROCESS_NUM * 10:
-    for i in range(100):
+    for i in range(30):
       spawn(str(uuid.uuid4()))
 
   elif size >= MAX_PROCESS_NUM * 100:
-    for i in range(300):
+    for i in range(50):
       spawn(str(uuid.uuid4()))
 
 def start(rconn):
   global  object_api
   global product_api
-  global crawl_api
   global version_id
 
   try:
@@ -351,15 +350,20 @@ def start(rconn):
     while True:
       version_id = get_latest_crawl_version()
       if version_id is not None:
-        index_file = None
-        reset_index(version_id)
-        prepare_objects_to_index(rconn, version_id)
-        dispatch(rconn)
+        log.info("check_condition_to_start")
+        ok = check_condition_to_start(version_id)
+        log.info("check_condition_to_start: " + str(ok))
 
-        if DATA_SOURCE == DATA_SOURCE_QUEUE:
-          load_from_queue(index_file)
-        elif DATA_SOURCE == DATA_SOURCE_DB:
-          load_from_db(index_file, version_id)
+        if ok is True:
+          index_file = None
+          reset_index(version_id)
+          prepare_objects_to_index(rconn, version_id)
+          dispatch(rconn)
+
+          if DATA_SOURCE == DATA_SOURCE_QUEUE:
+            load_from_queue(index_file)
+          elif DATA_SOURCE == DATA_SOURCE_DB:
+            load_from_db(index_file, version_id)
 
       time.sleep(60*10)
   except Exception as e:

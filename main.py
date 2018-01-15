@@ -12,6 +12,7 @@ import os
 from util import s3
 from bluelens_spawning_pool import spawning_pool
 from stylelens_object.objects import Objects
+from stylelens_object.features import Features
 from stylelens_product.products import Products
 from stylelens_product.crawls import Crawls
 from bluelens_log import Logging
@@ -40,6 +41,12 @@ DB_OBJECT_NAME = os.environ['DB_OBJECT_NAME']
 DB_OBJECT_USER = os.environ['DB_OBJECT_USER']
 DB_OBJECT_PASSWORD = os.environ['DB_OBJECT_PASSWORD']
 
+DB_OBJECT_FEATURE_HOST = os.environ['DB_OBJECT_FEATURE_HOST']
+DB_OBJECT_FEATURE_PORT = os.environ['DB_OBJECT_FEATURE_PORT']
+DB_OBJECT_FEATURE_NAME = os.environ['DB_OBJECT_FEATURE_NAME']
+DB_OBJECT_FEATURE_USER = os.environ['DB_OBJECT_FEATURE_USER']
+DB_OBJECT_FEATURE_PASSWORD = os.environ['DB_OBJECT_FEATURE_PASSWORD']
+
 DATA_SOURCE_QUEUE = 'REDIS_QUEUE'
 DATA_SOURCE_DB = 'DB'
 
@@ -67,6 +74,7 @@ rconn = redis.StrictRedis(REDIS_SERVER, port=6379, password=REDIS_PASSWORD)
 storage = s3.S3(AWS_ACCESS_KEY, AWS_SECRET_ACCESS_KEY)
 
 object_api = None
+feature_api = None
 product_api = None
 crawl_api = None
 version_id = None
@@ -103,6 +111,11 @@ def spawn(uuid):
   pool.addContainerEnv(container, 'DB_OBJECT_USER', DB_OBJECT_USER)
   pool.addContainerEnv(container, 'DB_OBJECT_PASSWORD', DB_OBJECT_PASSWORD)
   pool.addContainerEnv(container, 'DB_OBJECT_NAME', DB_OBJECT_NAME)
+  pool.addContainerEnv(container, 'DB_OBJECT_FEATURE_HOST', DB_OBJECT_FEATURE_HOST)
+  pool.addContainerEnv(container, 'DB_OBJECT_FEATURE_PORT', DB_OBJECT_FEATURE_PORT)
+  pool.addContainerEnv(container, 'DB_OBJECT_FEATURE_USER', DB_OBJECT_FEATURE_USER)
+  pool.addContainerEnv(container, 'DB_OBJECT_FEATURE_PASSWORD', DB_OBJECT_FEATURE_PASSWORD)
+  pool.addContainerEnv(container, 'DB_OBJECT_FEATURE_NAME', DB_OBJECT_FEATURE_NAME)
   pool.setContainerImage(container, 'bluelens/bl-object-indexer:' + RELEASE_MODE)
   pool.setContainerImagePullPolicy(container, 'Always')
   pool.addContainer(container)
@@ -113,7 +126,7 @@ def save_objects_to_db(objects):
   # log.info('save_object_to_db')
   global object_api
   try:
-    api_response = object_api.update_objects(objects)
+    api_response = object_api.update_objects_by_id(objects)
     # log.debug(api_response)
   except Exception as e:
     log.warn("Exception when calling update_object: %s\n" % e)
@@ -125,7 +138,11 @@ def reset_index(version_id):
   except Exception as e:
     log.error(str(e))
 
+def wait_for_featuring():
+  rconn.llen(REDIS_OBJECT_INDEX_QUEUE)
+
 def load_from_db(index_file, version_id):
+  global feature_api
   log.info('load_from_db')
   VECTOR_SIZE = 2048
 
@@ -137,25 +154,30 @@ def load_from_db(index_file, version_id):
     log.debug('Load from index file')
     index2 = faiss.read_index(index_file)
 
-  limit = 300
+  offset = 0
+  limit = 100
   id_num = 1
-
-  counter = 0
 
   file = os.path.join(os.getcwd(), INDEX_FILE)
 
+  i = 0
   try:
     while True:
-      res = object_api.get_objects_with_null_index(version_id=version_id, offset=0, limit=limit)
+      queue_size = rconn.llen(REDIS_OBJECT_INDEX_QUEUE)
+      if queue_size != 0:
+        time.sleep(60)
+        continue
+
+      res = feature_api.get_features(offset=offset, limit=limit)
 
       if len(res) == 0:
         save_index_file(file)
-        time.sleep(INTERVAL_TIME)
+        time.sleep(60*60)
         continue
 
       objects = []
       for obj in res:
-        feature = np.fromstring(obj['feature'], dtype=np.float32)
+        feature = np.fromstring(obj['vector'], dtype=np.float32)
         xb = np.expand_dims(np.array(feature, dtype=np.float32), axis=0)
         id_array = []
         id_array.append(id_num)
@@ -163,15 +185,18 @@ def load_from_db(index_file, version_id):
         index2.add_with_ids(xb, id_set)
 
         new_obj = {}
-        new_obj['name'] = obj['name']
+        new_obj['object_id'] = obj['object_id']
         new_obj['index'] = id_num
         objects.append(new_obj)
         id_num = id_num + 1
 
       save_objects_to_db(objects)
       faiss.write_index(index2, file)
+      if i % 100 == 0:
+        save_index_file(file)
 
-      counter = counter + limit
+      offset = offset + limit
+      i = i + 1
 
   except Exception as e:
     log.error(str(e))
@@ -276,20 +301,27 @@ def prepare_objects_to_index(rconn, version_id):
 
   rconn.delete(REDIS_OBJECT_INDEX_QUEUE)
   remove_prev_pods()
+  i = 0
   try:
     log.debug("prepare_objects_to_index")
     while True:
-      res = object_api.get_objects_with_null_feature(version_id=version_id,
-                                                     offset=offset,
-                                                     limit=limit)
+      res = object_api.get_objects(version_id=version_id,
+                                   is_main=True,
+                                   offset=offset,
+                                   limit=limit)
       log.debug("Got " + str(len(res)) + ' objects')
-      for product in res:
-        rconn.lpush(REDIS_OBJECT_INDEX_QUEUE, pickle.dumps(product))
+      for obj in res:
+        rconn.lpush(REDIS_OBJECT_INDEX_QUEUE, pickle.dumps(obj))
 
       if limit > len(res):
         break
       else:
         offset = offset + limit
+
+      if i % (10*MAX_PROCESS_NUM) == 0:
+        spawn(str(uuid.uuid4()))
+
+      i = i + 1
 
   except Exception as e:
     log.error(str(e))
@@ -317,24 +349,26 @@ def check_condition_to_start(version_id):
   return True
 
 def dispatch(rconn):
-  global product_api
+  for i in range(50):
+    spawn(str(uuid.uuid4()))
 
-  size = rconn.llen(REDIS_OBJECT_INDEX_QUEUE)
-
-  if size > 0 and size < MAX_PROCESS_NUM:
-    for i in range(10):
-      spawn(str(uuid.uuid4()))
-
-  if size >= MAX_PROCESS_NUM and size < MAX_PROCESS_NUM * 10:
-    for i in range(30):
-      spawn(str(uuid.uuid4()))
-
-  elif size >= MAX_PROCESS_NUM * 100:
-    for i in range(50):
-      spawn(str(uuid.uuid4()))
+  # size = rconn.llen(REDIS_OBJECT_INDEX_QUEUE)
+  #
+  # if size > 0 and size < MAX_PROCESS_NUM:
+  #   for i in range(10):
+  #     spawn(str(uuid.uuid4()))
+  #
+  # if size >= MAX_PROCESS_NUM and size < MAX_PROCESS_NUM * 10:
+  #   for i in range(30):
+  #     spawn(str(uuid.uuid4()))
+  #
+  # elif size >= MAX_PROCESS_NUM * 100:
+  #   for i in range(50):
+  #     spawn(str(uuid.uuid4()))
 
 def start(rconn):
-  global  object_api
+  global object_api
+  global feature_api
   global product_api
   global version_id
 
@@ -342,6 +376,7 @@ def start(rconn):
     log.info("Start bl-object-index:1")
 
     object_api = Objects()
+    feature_api = Features()
     product_api = Products()
     crawl_api = Crawls()
     file = os.path.join(os.getcwd(), INDEX_FILE)
@@ -357,8 +392,8 @@ def start(rconn):
         if ok is True:
           index_file = None
           reset_index(version_id)
-          prepare_objects_to_index(rconn, version_id)
-          dispatch(rconn)
+          # dispatch(rconn)
+          # prepare_objects_to_index(rconn, version_id)
 
           if DATA_SOURCE == DATA_SOURCE_QUEUE:
             load_from_queue(index_file)

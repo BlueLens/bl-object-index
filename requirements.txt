@@ -13,4 +13,4 @@ s3transfer==0.1.11
 six==1.11.0
 stylelens-object==0.0.35
 stylelens-product==1.0.49
-urllib3==1.22
+urllib3==1.26.5
